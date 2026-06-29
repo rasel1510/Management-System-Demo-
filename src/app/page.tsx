@@ -29,7 +29,15 @@ import {
   Menu,
   ChevronRight,
   TrendingUp,
-  Database
+  Database,
+  X,
+  FileSpreadsheet,
+  AlertTriangle,
+  Info,
+  ShieldCheck,
+  Check,
+  Activity,
+  Cpu
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -54,6 +62,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
+// Module-level unique ID counter — avoids Date.now() collisions and
+// length-based ID collisions after deletions.
+let _nextUniqueId = 1000;
+function getUniqueId() {
+  return _nextUniqueId++;
+}
+
 // Import mock data
 import {
   dashboardStats,
@@ -71,6 +86,7 @@ import {
   systemSettings as initialSystemSettings
 } from "@/lib/mock-data";
 
+// Type definitions
 interface User {
   id: number;
   name: string;
@@ -108,6 +124,12 @@ interface WorkflowStep {
   status: "Completed" | "In Progress" | "Pending";
 }
 
+interface Toast {
+  id: number;
+  message: string;
+  type: "success" | "warning" | "info";
+}
+
 export default function Home() {
   const [isMounted, setIsMounted] = useState(false);
   const [showDemo, setShowDemo] = useState(false);
@@ -123,6 +145,18 @@ export default function Home() {
   const [auditLogs, setAuditLogs] = useState(initialAuditLogs);
   const [workflowSteps, setWorkflowSteps] = useState<WorkflowStep[]>(initialWorkflowSteps as WorkflowStep[]);
 
+  // Toast Notifications state
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  // Permissions Matrix state
+  const [permissions, setPermissions] = useState({
+    "User Write": { Admin: true, Manager: true, Editor: false, Viewer: false },
+    "Task Create": { Admin: true, Manager: true, Editor: true, Viewer: false },
+    "Report Gen": { Admin: true, Manager: true, Editor: true, Viewer: false },
+    "System Control": { Admin: true, Manager: false, Editor: false, Viewer: false },
+    "Audit Purge": { Admin: true, Manager: false, Editor: false, Viewer: false }
+  });
+
   // Forms states
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [newUser, setNewUser] = useState<{ name: string; email: string; role: string; status: "Active" | "Inactive" | "Suspended" }>({ name: "", email: "", role: "Editor", status: "Active" });
@@ -132,6 +166,9 @@ export default function Home() {
   // Reporting generating animation
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [reportProgress, setReportProgress] = useState(0);
+
+  // Live Server Metrics
+  const [serverLoad, setServerLoad] = useState({ cpu: 28, memory: 58, disk: 42 });
 
   // Notifications simulation
   const [notifications, setNotifications] = useState([
@@ -143,12 +180,31 @@ export default function Home() {
 
   useEffect(() => {
     setIsMounted(true);
+    
+    // Simulate changing system stats in background
+    const interval = setInterval(() => {
+      setServerLoad({
+        cpu: Math.floor(Math.random() * 20) + 15,
+        memory: Math.floor(Math.random() * 8) + 52,
+        disk: 42
+      });
+    }, 4000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Toast handler
+  const triggerToast = (message: string, type: "success" | "warning" | "info" = "success") => {
+    const id = getUniqueId();
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
 
   // Log actions to the audit log dynamically
   const addAuditLog = (action: string, user: string = "Current User", status: "Success" | "Failed" | "Warning" = "Success") => {
     const newLog = {
-      id: Date.now(),
+      id: getUniqueId(),
       action,
       user,
       timestamp: new Date().toLocaleString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, month: "short", day: "numeric", year: "numeric" }),
@@ -165,7 +221,7 @@ export default function Home() {
 
     const initials = newUser.name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
     const addedUser = {
-      id: users.length + 1,
+      id: getUniqueId(),
       name: newUser.name,
       email: newUser.email,
       role: newUser.role,
@@ -176,6 +232,7 @@ export default function Home() {
 
     setUsers(prev => [addedUser, ...prev]);
     addAuditLog(`User Added: ${newUser.name} (${newUser.role})`);
+    triggerToast(`Added security user: ${newUser.name}`, "success");
     setNewUser({ name: "", email: "", role: "Editor", status: "Active" });
     setShowAddUserModal(false);
   };
@@ -184,6 +241,7 @@ export default function Home() {
   const handleDeleteUser = (id: number, name: string) => {
     setUsers(prev => prev.filter(u => u.id !== id));
     addAuditLog(`User Deleted: ${name}`, "Current User", "Warning");
+    triggerToast(`Removed user ${name}`, "warning");
   };
 
   // Toggle user status
@@ -191,6 +249,7 @@ export default function Home() {
     const nextStatus = currentStatus === "Active" ? "Inactive" : "Active";
     setUsers(prev => prev.map(u => u.id === id ? { ...u, status: nextStatus } : u));
     addAuditLog(`Status changed for ${name} to ${nextStatus}`);
+    triggerToast(`${name} is now ${nextStatus}`, "info");
   };
 
   // Add Task handler
@@ -198,8 +257,8 @@ export default function Home() {
     e.preventDefault();
     if (!newTask.title || !newTask.assignee) return;
 
-    const addedTask = {
-      id: `TSK-0${tasks.length + 1}`,
+    const addedTask: Task = {
+      id: `TSK-${getUniqueId()}`,
       title: newTask.title,
       assignee: newTask.assignee,
       priority: newTask.priority,
@@ -210,6 +269,7 @@ export default function Home() {
 
     setTasks(prev => [addedTask, ...prev]);
     addAuditLog(`Task Created: "${newTask.title}"`);
+    triggerToast(`Task "${newTask.title.slice(0, 20)}..." created!`, "success");
     setNewTask({ title: "", assignee: "", priority: "Medium", status: "Pending", category: "Development" });
     setShowAddTaskModal(false);
   };
@@ -218,6 +278,7 @@ export default function Home() {
   const handleUpdateTaskStatus = (id: string, title: string, nextStatus: "Completed" | "In Progress" | "Pending" | "Overdue") => {
     setTasks(prev => prev.map(t => t.id === id ? { ...t, status: nextStatus } : t));
     addAuditLog(`Task Status Updated: "${title}" to ${nextStatus}`);
+    triggerToast(`Task status updated to ${nextStatus}`, "info");
   };
 
   // Generate Report simulations
@@ -226,6 +287,7 @@ export default function Home() {
     setIsGeneratingReport(true);
     setReportProgress(0);
     addAuditLog("Report generation initiated", "Current User");
+    triggerToast("Compiling systems security logs...", "info");
 
     const interval = setInterval(() => {
       setReportProgress(prev => {
@@ -233,7 +295,7 @@ export default function Home() {
           clearInterval(interval);
           setTimeout(() => {
             const newReport = {
-              id: reports.length + 1,
+              id: getUniqueId(),
               title: `System Performance Report ${new Date().toLocaleDateString()}`,
               type: "Performance",
               date: new Date().toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" }),
@@ -244,8 +306,9 @@ export default function Home() {
             setReports(prevReports => [newReport, ...prevReports]);
             setIsGeneratingReport(false);
             addAuditLog("Report generated successfully");
+            triggerToast("New audit report generated!", "success");
             setNotifications(prevNotif => [
-              { id: Date.now(), text: `New report "${newReport.title}" generated`, read: false },
+              { id: getUniqueId(), text: `New report "${newReport.title}" generated`, read: false },
               ...prevNotif
             ]);
           }, 400);
@@ -260,25 +323,82 @@ export default function Home() {
   const handleToggleSetting = (label: string, currentValue: boolean) => {
     setSystemSettings(prev => prev.map(s => s.label === label ? { ...s, enabled: !currentValue } : s));
     addAuditLog(`System Setting Changed: "${label}" set to ${!currentValue ? 'ENABLED' : 'DISABLED'}`);
+    triggerToast(`Setting "${label}" ${!currentValue ? 'enabled' : 'disabled'}`, "info");
   };
 
   // Advance workflow simulation
+  // NOTE: Side effects (addAuditLog, triggerToast) must NOT be called inside
+  // setState updaters — React Strict Mode double-invokes updaters, which would
+  // fire the side effects twice and create duplicate entries.
   const handleAdvanceWorkflow = (index: number) => {
-    setWorkflowSteps(prev => {
-      const nextSteps = [...prev];
-      if (nextSteps[index].status === "Pending") {
-        nextSteps[index].status = "In Progress";
-        addAuditLog(`Workflow Step Progress: "${nextSteps[index].name}" is now In Progress`);
-      } else if (nextSteps[index].status === "In Progress") {
-        nextSteps[index].status = "Completed";
-        addAuditLog(`Workflow Step Progress: "${nextSteps[index].name}" completed`);
-        if (index + 1 < nextSteps.length) {
-          nextSteps[index + 1].status = "In Progress";
-          addAuditLog(`Workflow Step Progress: "${nextSteps[index + 1].name}" is now In Progress`);
-        }
+    const nextSteps = [...workflowSteps];
+    if (nextSteps[index].status === "Pending") {
+      nextSteps[index] = { ...nextSteps[index], status: "In Progress" };
+      setWorkflowSteps(nextSteps);
+      addAuditLog(`Workflow Step Progress: "${nextSteps[index].name}" is now In Progress`);
+      triggerToast(`Step "${nextSteps[index].name}" started`, "info");
+    } else if (nextSteps[index].status === "In Progress") {
+      nextSteps[index] = { ...nextSteps[index], status: "Completed" };
+      if (index + 1 < nextSteps.length) {
+        nextSteps[index + 1] = { ...nextSteps[index + 1], status: "In Progress" };
       }
-      return nextSteps;
-    });
+      setWorkflowSteps(nextSteps);
+      addAuditLog(`Workflow Step Progress: "${nextSteps[index].name}" completed`);
+      triggerToast(`Step "${nextSteps[index].name}" completed!`, "success");
+      if (index + 1 < nextSteps.length) {
+        addAuditLog(`Workflow Step Progress: "${nextSteps[index + 1].name}" is now In Progress`);
+      }
+    }
+  };
+
+  // Roles & Permissions matrix toggle handler
+  // NOTE: Side effects moved outside the state updater to prevent
+  // double-firing under React Strict Mode.
+  const handleTogglePermission = (permission: string, role: string) => {
+    const updatedRolePerms = { ...permissions[permission as keyof typeof permissions] };
+    const currentValue = updatedRolePerms[role as keyof typeof updatedRolePerms];
+    updatedRolePerms[role as keyof typeof updatedRolePerms] = !currentValue;
+
+    const nextPerms = {
+      ...permissions,
+      [permission]: updatedRolePerms
+    };
+
+    setPermissions(nextPerms);
+    addAuditLog(`Permission Changed: "${permission}" for role "${role}" set to ${!currentValue ? 'ALLOWED' : 'DENIED'}`, "Current User");
+    triggerToast(`Permission "${permission}" for ${role} is now ${!currentValue ? 'Allowed' : 'Denied'}`, "info");
+  };
+
+  // Download simulation data as CSV
+  const handleExportCSV = (type: "users" | "tasks" | "logs") => {
+    let content = "";
+    let filename = "";
+    if (type === "users") {
+      content = "ID,Name,Email,Role,Status,LastActive\n" + 
+        users.map(u => `${u.id},"${u.name}","${u.email}",${u.role},${u.status},"${u.lastActive}"`).join("\n");
+      filename = "neuravixor_users.csv";
+    } else if (type === "tasks") {
+      content = "ID,Title,Assignee,Priority,Status,DueDate,Category\n" + 
+        tasks.map(t => `${t.id},"${t.title}","${t.assignee}",${t.priority},${t.status},"${t.dueDate}",${t.category}`).join("\n");
+      filename = "neuravixor_tasks.csv";
+    } else {
+      content = "Timestamp,IP,User,Action,Status\n" + 
+        auditLogs.map(l => `"${l.timestamp}",${l.ip},"${l.user}","${l.action}",${l.status}`).join("\n");
+      filename = "neuravixor_audit_logs.csv";
+    }
+
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    addAuditLog(`Data Exported: downloaded ${type} list as CSV`, "Current User");
+    triggerToast(`Exported ${type} data as CSV`, "success");
   };
 
   if (!isMounted) {
@@ -286,7 +406,7 @@ export default function Home() {
       <div className="flex h-screen w-screen items-center justify-center bg-[#030712] text-white">
         <div className="flex flex-col items-center gap-4">
           <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent"></div>
-          <p className="text-sm font-medium text-slate-400">Loading Neuravixor...</p>
+          <p className="text-sm font-semibold text-slate-350">Loading Neuravixor...</p>
         </div>
       </div>
     );
@@ -295,6 +415,30 @@ export default function Home() {
   return (
     <div className="relative min-h-screen bg-[#030712] overflow-x-hidden text-slate-100 selection:bg-indigo-500/30">
       
+      {/* TOAST SYSTEM CONTAINER */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2.5 max-w-sm w-full">
+        {toasts.map(t => (
+          <div 
+            key={t.id} 
+            className="flex items-center justify-between p-4 rounded-xl shadow-2xl bg-[#090f1d] border border-white/10 text-xs text-white border-l-4 animate-slide-in"
+            style={{ borderLeftColor: t.type === "success" ? "#10b981" : t.type === "warning" ? "#f59e0b" : "#3b82f6" }}
+          >
+            <div className="flex items-center gap-2.5">
+              {t.type === "success" && <CheckCircle2 className="h-4.5 w-4.5 text-green-400 shrink-0" />}
+              {t.type === "warning" && <AlertTriangle className="h-4.5 w-4.5 text-amber-400 shrink-0" />}
+              {t.type === "info" && <Info className="h-4.5 w-4.5 text-blue-400 shrink-0" />}
+              <span className="font-semibold leading-snug">{t.message}</span>
+            </div>
+            <button 
+              onClick={() => setToasts(prev => prev.filter(x => x.id !== t.id))}
+              className="p-1 text-slate-400 hover:text-white transition-colors cursor-pointer shrink-0 ml-2"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ))}
+      </div>
+
       {/* BACKGROUND GRAPHICS */}
       <div className="absolute inset-0 bg-neon-grid animate-grid-shift pointer-events-none opacity-40 z-0"></div>
       
@@ -326,12 +470,12 @@ export default function Home() {
             
             <button 
               onClick={() => setShowDemo(true)}
-              className="group relative inline-flex items-center justify-center overflow-hidden rounded-lg px-6 py-2 text-sm font-semibold text-white shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95"
+              className="group relative inline-flex items-center justify-center overflow-hidden rounded-lg px-6 py-2 text-sm font-semibold text-white shadow-2xl transition-all duration-300 hover:scale-105 active:scale-95 cursor-pointer"
             >
               <span className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600"></span>
               <span className="absolute inset-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500 opacity-0 transition-opacity duration-300 group-hover:opacity-100"></span>
               <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-1000 group-hover:translate-x-full"></span>
-              <span className="relative flex items-center gap-2 font-bold cursor-pointer">
+              <span className="relative flex items-center gap-2 font-bold">
                 Launch Live Demo
                 <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </span>
@@ -341,8 +485,8 @@ export default function Home() {
           {/* Main Grid */}
           <main className="grid grid-cols-1 items-center gap-12 py-12 lg:grid-cols-12 lg:gap-8 xl:gap-16">
             {/* Left Content Column */}
-            <div className="flex flex-col gap-6 lg:col-span-5">
-              <div className="inline-flex max-w-fit items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/5 px-3 py-1 text-xs font-medium text-indigo-300">
+            <div className="flex flex-col gap-6 lg:col-span-5 text-left">
+              <div className="inline-flex max-w-fit items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/5 px-3 py-1 text-xs font-semibold text-indigo-300">
                 <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
                 v0.1.0 Interactive Preview
               </div>
@@ -354,7 +498,7 @@ export default function Home() {
               
               <div className="h-[2px] w-24 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full"></div>
               
-              <p className="text-lg leading-relaxed text-slate-400 font-sans max-w-md">
+              <p className="text-lg leading-relaxed text-slate-200 font-sans max-w-md">
                 Control operations, users, reports, and workflows from one unified, beautiful platform. Optimized for state-of-the-art visual presentation.
               </p>
               
@@ -370,7 +514,7 @@ export default function Home() {
                     const el = document.getElementById("device-mock");
                     el?.scrollIntoView({ behavior: "smooth" });
                   }}
-                  className="px-6 py-4 rounded-xl font-semibold border border-slate-700 bg-slate-900/50 hover:bg-slate-900 hover:border-slate-600 transition-all duration-300 text-slate-300 text-sm cursor-pointer"
+                  className="px-6 py-4 rounded-xl font-semibold border border-slate-750 bg-slate-900/50 hover:bg-slate-900 hover:border-slate-600 transition-all duration-300 text-slate-250 text-sm cursor-pointer"
                 >
                   Quick Preview
                 </button>
@@ -379,15 +523,15 @@ export default function Home() {
               <div className="grid grid-cols-3 gap-6 pt-8 border-t border-slate-800/80">
                 <div>
                   <div className="text-2xl font-bold text-white">99.9%</div>
-                  <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Uptime SLA</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Uptime SLA</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">Zero</div>
-                  <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">DB Required</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">DB Required</div>
                 </div>
                 <div>
                   <div className="text-2xl font-bold text-white">Full</div>
-                  <div className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Mock Sync</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Mock Sync</div>
                 </div>
               </div>
             </div>
@@ -498,7 +642,7 @@ export default function Home() {
           </main>
 
           {/* Footer Bar */}
-          <footer className="flex flex-col md:flex-row items-center justify-between border-t border-slate-800/60 pt-6 mt-12 text-sm text-slate-500">
+          <footer className="flex flex-col md:flex-row items-center justify-between border-t border-slate-800/60 pt-6 mt-12 text-sm text-slate-400">
             <p>© {new Date().getFullYear()} Neuravixor Inc. All rights reserved.</p>
             <div className="flex items-center gap-6 mt-4 md:mt-0">
               <a href="#" onClick={(e) => {e.preventDefault(); setShowDemo(true)}} className="hover:text-indigo-400 transition-colors">Client View</a>
@@ -513,10 +657,10 @@ export default function Home() {
       {/* MODE 2: FULL-SCREEN INTERACTIVE DASHBOARD SUITE */}
       {/* ========================================================================= */}
       {showDemo && (
-        <div className="relative z-10 min-h-screen flex text-slate-100 bg-[#080d1a] border-t border-white/5 animate-fade-in custom-scrollbar">
+        <div className="relative z-10 min-h-screen flex text-slate-100 bg-[#060a13] border-t border-white/5 animate-fade-in custom-scrollbar">
           
           {/* SIDEBAR NAVIGATION */}
-          <aside className="hidden md:flex flex-col w-64 border-r border-slate-800 bg-[#0b0f19]/90 backdrop-blur-xl">
+          <aside className="hidden md:flex flex-col w-64 border-r border-slate-800 bg-[#080d19]/95 backdrop-blur-xl">
             {/* Sidebar Brand Header */}
             <div className="flex h-16 items-center justify-between px-6 border-b border-slate-800">
               <div className="flex items-center gap-2">
@@ -527,7 +671,7 @@ export default function Home() {
                 </div>
                 <span className="font-bold tracking-tight text-white">Neuravixor</span>
               </div>
-              <Badge className="bg-indigo-500/10 border-indigo-500/30 text-indigo-400">Demo</Badge>
+              <Badge className="bg-indigo-500/15 border-indigo-500/40 text-indigo-300 font-bold">Demo</Badge>
             </div>
 
             {/* Sidebar Navigation Items */}
@@ -549,18 +693,18 @@ export default function Home() {
                       setActiveTab(item.name);
                       setSearchQuery("");
                     }}
-                    className={`flex w-full items-center justify-between px-4 py-3 rounded-xl text-sm font-semibold transition-all group cursor-pointer ${
+                    className={`flex w-full items-center justify-between px-4 py-3 rounded-xl text-sm font-bold transition-all group cursor-pointer ${
                       isSelected
-                        ? "bg-indigo-600/20 text-white border border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
-                        : "text-slate-400 hover:text-white hover:bg-white/5"
+                        ? "bg-indigo-600/20 text-white border border-indigo-500/40 shadow-[0_0_15px_rgba(99,102,241,0.2)]"
+                        : "text-slate-350 hover:text-white hover:bg-white/5"
                     }`}
                   >
                     <div className="flex items-center gap-3">
-                      <IconComponent className={`h-4.5 w-4.5 transition-colors ${isSelected ? "text-indigo-400" : "text-slate-400 group-hover:text-white"}`} />
+                      <IconComponent className={`h-4.5 w-4.5 transition-colors ${isSelected ? "text-indigo-300" : "text-slate-350 group-hover:text-white"}`} />
                       <span>{item.name}</span>
                     </div>
                     {item.badge !== undefined && (
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isSelected ? "bg-indigo-500 text-white" : "bg-slate-800 text-slate-400"}`}>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isSelected ? "bg-indigo-500 text-white" : "bg-slate-800 text-slate-300"}`}>
                         {item.badge}
                       </span>
                     )}
@@ -573,7 +717,7 @@ export default function Home() {
             <div className="p-4 border-t border-slate-800">
               <button
                 onClick={() => setShowDemo(false)}
-                className="flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-semibold rounded-xl border border-slate-800 hover:bg-slate-900 hover:border-slate-700 transition-all text-slate-400 hover:text-white cursor-pointer"
+                className="flex w-full items-center justify-center gap-2 px-4 py-3 text-sm font-bold rounded-xl border border-slate-800 hover:bg-slate-900 hover:border-slate-700 transition-all text-slate-350 hover:text-white cursor-pointer"
               >
                 <LogOut className="h-4 w-4" />
                 Exit Presentation
@@ -585,18 +729,18 @@ export default function Home() {
           <div className="flex-1 flex flex-col min-w-0 overflow-y-auto custom-scrollbar">
             
             {/* TOP BAR / NAVIGATION */}
-            <header className="flex h-16 items-center justify-between px-6 border-b border-slate-800 bg-[#0b0f19]/70 backdrop-blur-md sticky top-0 z-30">
+            <header className="flex h-16 items-center justify-between px-6 border-b border-slate-800 bg-[#080d19]/80 backdrop-blur-md sticky top-0 z-30">
               <div className="flex items-center gap-4">
                 <button
                   onClick={() => setShowDemo(false)}
-                  className="md:hidden p-2 rounded-lg border border-slate-800 hover:bg-slate-900 text-slate-400 hover:text-white cursor-pointer"
+                  className="md:hidden p-2 rounded-lg border border-slate-800 hover:bg-slate-900 text-slate-300 hover:text-white cursor-pointer"
                 >
                   <LogOut className="h-4 w-4" />
                 </button>
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-500 font-medium">Console</span>
+                <div className="flex items-center gap-2 text-xs md:text-sm">
+                  <span className="text-slate-400 font-bold">Console</span>
                   <span className="text-slate-700">/</span>
-                  <span className="text-white font-semibold">{activeTab}</span>
+                  <span className="text-white font-extrabold">{activeTab}</span>
                 </div>
               </div>
 
@@ -604,13 +748,13 @@ export default function Home() {
               <div className="flex items-center gap-4">
                 {/* Search Header */}
                 <div className="relative hidden sm:block w-64">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
                     placeholder={`Search ${activeTab.toLowerCase()}...`}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 text-xs rounded-xl bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition-all"
+                    className="w-full pl-10 pr-4 py-2 text-xs rounded-xl bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 transition-all font-semibold"
                   />
                 </div>
 
@@ -618,7 +762,7 @@ export default function Home() {
                 <div className="relative">
                   <button 
                     onClick={() => setShowNotifications(!showNotifications)}
-                    className="relative p-2 rounded-xl border border-slate-800 hover:bg-slate-900 text-slate-400 hover:text-white transition-all cursor-pointer"
+                    className="relative p-2 rounded-xl border border-slate-800 hover:bg-slate-900 text-slate-350 hover:text-white transition-all cursor-pointer"
                   >
                     <Bell className="h-4.5 w-4.5" />
                     {notifications.filter(n => !n.read).length > 0 && (
@@ -639,7 +783,7 @@ export default function Home() {
                       </div>
                       <div className="space-y-2.5 max-h-60 overflow-y-auto custom-scrollbar">
                         {notifications.map(n => (
-                          <div key={n.id} className={`p-2 rounded-lg text-xs leading-relaxed border ${n.read ? "bg-transparent border-transparent text-slate-400" : "bg-indigo-500/5 border-indigo-500/10 text-white"}`}>
+                          <div key={n.id} className={`p-2 rounded-lg text-xs leading-relaxed border ${n.read ? "bg-transparent border-transparent text-slate-300" : "bg-indigo-500/5 border-indigo-500/10 text-white"}`}>
                             {n.text}
                           </div>
                         ))}
@@ -650,19 +794,19 @@ export default function Home() {
 
                 {/* User avatar */}
                 <div className="flex items-center gap-3">
-                  <Avatar className="h-8 w-8 rounded-xl border border-indigo-500/20 bg-indigo-500/10 text-indigo-300 font-bold text-xs">
+                  <Avatar className="h-8 w-8 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 font-extrabold text-xs">
                     <AvatarFallback>AD</AvatarFallback>
                   </Avatar>
                   <div className="hidden lg:flex flex-col text-left">
                     <span className="text-xs font-bold text-white">Administrator</span>
-                    <span className="text-[10px] text-slate-500 font-medium">admin@neuravixor.com</span>
+                    <span className="text-[10px] text-slate-400 font-semibold">admin@neuravixor.com</span>
                   </div>
                 </div>
               </div>
             </header>
 
             {/* MAIN PANEL CONTENT SCROLLABLE AREA */}
-            <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto space-y-8 z-10">
+            <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto space-y-8 z-10 text-left">
 
               {/* ========================================= */}
               {/* TAB 1: CORE DASHBOARD */}
@@ -670,39 +814,46 @@ export default function Home() {
               {activeTab === "Dashboard" && (
                 <div className="space-y-6">
                   {/* Dynamic welcome banner */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl border border-indigo-500/15 bg-indigo-500/5 shadow-inner">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-6 rounded-2xl border border-indigo-500/20 bg-indigo-500/10 shadow-inner">
                     <div>
                       <h2 className="text-2xl font-bold text-white">Console Overview</h2>
-                      <p className="text-sm text-slate-400 mt-1">Here is a summary of activities and states in Neuravixor.</p>
+                      <p className="text-sm text-slate-200 mt-1">Real-time status updates and advanced administrative analytics.</p>
                     </div>
                     <div className="flex gap-2">
                       <Button 
                         onClick={handleGenerateReport} 
-                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl border border-indigo-400/20 shadow-lg shadow-indigo-600/15 flex items-center gap-2 cursor-pointer"
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-4 py-2.5 rounded-xl border border-indigo-400/30 shadow-lg shadow-indigo-600/15 flex items-center gap-2 cursor-pointer text-xs"
                         disabled={isGeneratingReport}
                       >
                         <RefreshCcw className={`h-4 w-4 ${isGeneratingReport ? "animate-spin" : ""}`} />
-                        {isGeneratingReport ? `Generating... (${reportProgress}%)` : "Generate New Report"}
+                        {isGeneratingReport ? `Generating... (${reportProgress}%)` : "Compile New Report"}
                       </Button>
                     </div>
                   </div>
 
-                  {/* STATS CARDS */}
+                  {/* STATS CARDS (Now clickable and highly responsive) */}
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                     {[
-                      { label: "Users", value: users.length, icon: Users, color: "text-purple-400 bg-purple-500/10 border-purple-500/20" },
-                      { label: "Tasks", value: tasks.length, icon: CheckSquare, color: "text-blue-400 bg-blue-500/10 border-blue-500/20" },
-                      { label: "Reports", value: reports.length, icon: FileText, color: "text-teal-400 bg-teal-500/10 border-teal-500/20" },
-                      { label: "Workflows", value: workflows.length, icon: GitBranch, color: "text-pink-400 bg-pink-500/10 border-pink-500/20" }
+                      { label: "Users", value: users.length, icon: Users, color: "text-purple-300 bg-purple-500/15 border-purple-500/30", tab: "Users" },
+                      { label: "Tasks", value: tasks.length, icon: CheckSquare, color: "text-blue-300 bg-blue-500/15 border-blue-500/30", tab: "Tasks" },
+                      { label: "Reports", value: reports.length, icon: FileText, color: "text-teal-300 bg-teal-500/15 border-teal-500/30", tab: "Reports" },
+                      { label: "Workflows", value: workflows.length, icon: GitBranch, color: "text-pink-300 bg-pink-500/15 border-pink-500/30", tab: "Workflows" }
                     ].map((stat, index) => {
                       const IconComponent = stat.icon;
                       return (
-                        <div key={index} className="p-6 rounded-2xl border border-slate-800 bg-[#0c1220]/80 hover:scale-[1.02] transition-all duration-300 flex items-center justify-between group shadow-xl">
+                        <div 
+                          key={index} 
+                          onClick={() => {
+                            setActiveTab(stat.tab);
+                            triggerToast(`Redirecting viewport to ${stat.tab}...`, "info");
+                          }}
+                          className="glass-panel p-6 rounded-2xl border border-slate-800 hover:scale-[1.03] hover:border-indigo-500/35 transition-all duration-300 flex items-center justify-between group shadow-xl cursor-pointer"
+                        >
                           <div className="space-y-2">
-                            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.label}</span>
-                            <div className="text-3xl font-extrabold text-white">{stat.value}</div>
+                            <span className="text-xs font-bold text-slate-350 uppercase tracking-wider">{stat.label}</span>
+                            <div className="text-3xl font-black text-white">{stat.value}</div>
                           </div>
-                          <div className={`p-4 rounded-xl border ${stat.color} group-hover:scale-110 transition-transform`}>
+                          <div className={`p-4 rounded-xl border ${stat.color} group-hover:scale-115 transition-all shadow-inner`}>
                             <IconComponent className="h-6 w-6" />
                           </div>
                         </div>
@@ -713,20 +864,20 @@ export default function Home() {
                   {/* CHARTS GRID */}
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* Left: Analytics Overview Line Chart */}
-                    <Card className="lg:col-span-8 border-slate-800 bg-[#0c1220]/80 shadow-xl overflow-hidden p-6">
+                    <Card className="glass-panel lg:col-span-8 border-slate-800 shadow-xl overflow-hidden p-6">
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                         <div>
                           <h3 className="text-base font-bold text-white">Analytics Overview</h3>
-                          <p className="text-xs text-slate-500 mt-0.5">Dual timeline tracking current vs past week</p>
+                          <p className="text-xs text-slate-350 mt-0.5">Dual timeline tracking current vs past week</p>
                         </div>
-                        <div className="flex items-center gap-4 text-xs">
+                        <div className="flex items-center gap-4 text-xs font-semibold">
                           <div className="flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full bg-blue-500"></span>
-                            <span className="text-slate-400 font-medium">This Week</span>
+                            <span className="h-2.5 w-2.5 rounded-full bg-blue-500"></span>
+                            <span className="text-slate-200">This Week</span>
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <span className="h-2 w-2 rounded-full bg-indigo-500 opacity-60"></span>
-                            <span className="text-slate-400 font-medium">Last Week</span>
+                            <span className="h-2.5 w-2.5 rounded-full bg-indigo-500"></span>
+                            <span className="text-slate-250">Last Week</span>
                           </div>
                         </div>
                       </div>
@@ -735,21 +886,21 @@ export default function Home() {
                           <AreaChart data={analyticsData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                             <defs>
                               <linearGradient id="colorThisWeek" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.15}/>
+                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25}/>
                                 <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                               </linearGradient>
                               <linearGradient id="colorLastWeek" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.08}/>
+                                <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
                                 <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                               </linearGradient>
                             </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.3} />
-                            <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} />
-                            <YAxis stroke="#64748b" fontSize={11} tickLine={false} axisLine={false} domain={[0, 5]} />
+                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.4} />
+                            <XAxis dataKey="day" stroke="#94a3b8" fontSize={11} fontWeight={600} tickLine={false} axisLine={false} />
+                            <YAxis stroke="#94a3b8" fontSize={11} fontWeight={600} tickLine={false} axisLine={false} domain={[0, 5]} />
                             <Tooltip 
-                              contentStyle={{ backgroundColor: "#0c1322", borderColor: "#1e293b", borderRadius: "12px", color: "#fff", fontSize: "11px" }}
+                              contentStyle={{ backgroundColor: "#080e1c", borderColor: "#3b82f6", borderRadius: "12px", color: "#f8fafc", fontSize: "11px", fontWeight: "600" }}
                             />
-                            <Area type="monotone" dataKey="thisWeek" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorThisWeek)" activeDot={{ r: 6 }} />
+                            <Area type="monotone" dataKey="thisWeek" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorThisWeek)" activeDot={{ r: 7 }} />
                             <Area type="monotone" dataKey="lastWeek" stroke="#6366f1" strokeWidth={2} strokeDasharray="4 4" fillOpacity={1} fill="url(#colorLastWeek)" />
                           </AreaChart>
                         </ResponsiveContainer>
@@ -757,10 +908,10 @@ export default function Home() {
                     </Card>
 
                     {/* Right: Task Status Donut Chart */}
-                    <Card className="lg:col-span-4 border-slate-800 bg-[#0c1220]/80 shadow-xl p-6 flex flex-col justify-between">
+                    <Card className="glass-panel lg:col-span-4 border-slate-800 shadow-xl p-6 flex flex-col justify-between">
                       <div>
                         <h3 className="text-base font-bold text-white">Task Status</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Current workload distribution</p>
+                        <p className="text-xs text-slate-350 mt-0.5">Current workload distribution percentage</p>
                       </div>
                       
                       <div className="relative h-44 my-4 flex items-center justify-center">
@@ -780,43 +931,44 @@ export default function Home() {
                               ))}
                             </Pie>
                             <Tooltip 
-                              contentStyle={{ backgroundColor: "#0c1322", borderColor: "#1e293b", borderRadius: "8px", color: "#fff", fontSize: "11px" }}
+                              contentStyle={{ backgroundColor: "#080e1c", borderColor: "#3b82f6", borderRadius: "8px", color: "#f8fafc", fontSize: "11px", fontWeight: "600" }}
                             />
                           </PieChart>
                         </ResponsiveContainer>
                         <div className="absolute flex flex-col items-center justify-center">
                           <span className="text-2xl font-black text-white">{tasks.length}</span>
-                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-wider">Total</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Total</span>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div className="grid grid-cols-2 gap-2 text-xs font-bold">
                         {taskStatusData.map((status, index) => (
-                          <div key={index} className="flex items-center gap-2 p-2 rounded-lg bg-slate-900/60 border border-white/5">
-                            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: status.color }}></span>
-                            <span className="text-slate-400 font-medium">{status.name}</span>
-                            <span className="ml-auto font-bold text-white">{status.value}%</span>
+                          <div key={index} className="flex items-center gap-2 p-2 rounded-lg bg-slate-900 border border-white/5">
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: status.color }}></span>
+                            <span className="text-slate-300 font-semibold">{status.name}</span>
+                            <span className="ml-auto text-white">{status.value}%</span>
                           </div>
                         ))}
                       </div>
                     </Card>
                   </div>
 
-                  {/* BOTTOM TRACKING ROW */}
+                  {/* BOTTOM WORKFLOW & GENERAL CONTROLS ROW */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     {/* Left: Workflow Tracking vertical stepper */}
-                    <Card className="border-slate-800 bg-[#0c1220]/80 shadow-xl p-6">
+                    <Card className="glass-panel border-slate-800 shadow-xl p-6">
                       <div className="flex items-center justify-between mb-6">
                         <div>
                           <h3 className="text-base font-bold text-white">Workflow Tracking</h3>
-                          <p className="text-xs text-slate-500 mt-0.5">Onboarding pipeline verification flow</p>
+                          <p className="text-xs text-slate-350 mt-0.5">Onboarding pipeline verification flow</p>
                         </div>
                         <Button 
                           onClick={() => {
                             setWorkflowSteps(initialWorkflowSteps);
                             addAuditLog("Reset onboarding workflow tracker", "System");
+                            triggerToast("Workflow reset successfully!", "info");
                           }}
-                          className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-white px-3 text-xs cursor-pointer"
+                          className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:text-white px-3 text-xs cursor-pointer font-bold"
                         >
                           Reset Flow
                         </Button>
@@ -835,10 +987,10 @@ export default function Home() {
                                   onClick={() => handleAdvanceWorkflow(index)}
                                   className={`h-7 w-7 rounded-full border-2 flex items-center justify-center font-bold text-xs transition-all cursor-pointer ${
                                     isCompleted 
-                                      ? "border-green-500 bg-green-500/10 text-green-400" 
+                                      ? "border-green-500 bg-green-500/10 text-green-300" 
                                       : isInProgress 
-                                      ? "border-blue-500 bg-blue-500/10 text-blue-400 ring-4 ring-blue-500/10 animate-pulse" 
-                                      : "border-slate-800 bg-slate-900 text-slate-500"
+                                      ? "border-blue-500 bg-blue-500/10 text-blue-300 ring-4 ring-blue-500/10 animate-pulse" 
+                                      : "border-slate-800 bg-slate-900 text-slate-400"
                                   }`}
                                   title="Click to progress this step"
                                 >
@@ -850,18 +1002,18 @@ export default function Home() {
                               </div>
                               
                               {/* Step details */}
-                              <div className="flex-1 p-3 rounded-xl border border-white/5 bg-slate-900/40 flex items-center justify-between hover:border-white/10 transition-colors">
+                              <div className="flex-1 p-3 rounded-xl border border-white/5 bg-slate-900/60 flex items-center justify-between hover:border-white/10 transition-colors">
                                 <div>
                                   <div className="text-xs font-bold text-white">{step.name}</div>
-                                  <div className="text-[10px] text-slate-500 mt-0.5">Updated: {step.time}</div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">Updated: {step.time}</div>
                                 </div>
                                 
                                 <Badge className={
                                   isCompleted 
-                                    ? "bg-green-500/10 border-green-500/30 text-green-400" 
+                                    ? "bg-green-500/10 border-green-500/40 text-green-300 font-bold" 
                                     : isInProgress 
-                                    ? "bg-blue-500/10 border-blue-500/30 text-blue-400" 
-                                    : "bg-slate-800 border-slate-700 text-slate-400"
+                                    ? "bg-blue-500/10 border-blue-500/40 text-blue-300 font-bold" 
+                                    : "bg-slate-900 border-slate-750 text-slate-400 font-semibold"
                                 }>
                                   {step.status}
                                 </Badge>
@@ -873,30 +1025,33 @@ export default function Home() {
                     </Card>
 
                     {/* Right: Quick actions and metrics */}
-                    <Card className="border-slate-800 bg-[#0c1220]/80 shadow-xl p-6">
+                    <Card className="glass-panel border-slate-800 shadow-xl p-6">
                       <div className="mb-6">
                         <h3 className="text-base font-bold text-white">System Control Panel</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Quick access shortcuts</p>
+                        <p className="text-xs text-slate-350 mt-0.5">Quick access shortcuts</p>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         {[
-                          { title: "User Management", desc: "View all user accounts", icon: Users, action: "Users", color: "border-purple-500/20 text-purple-400 hover:bg-purple-500/5" },
-                          { title: "Roles & Permissions", desc: "View security groups", icon: Shield, action: "System Control", color: "border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/5" },
-                          { title: "System Settings", desc: "View core settings config", icon: Settings, action: "System Control", color: "border-amber-500/20 text-amber-400 hover:bg-amber-500/5" },
-                          { title: "Audit Log Feed", desc: "Trace user logs stream", icon: FileText, action: "System Control", color: "border-blue-500/20 text-blue-400 hover:bg-blue-500/5" }
+                          { title: "User Management", desc: "View all user accounts", icon: Users, action: "Users", color: "border-purple-500/30 text-purple-300 hover:bg-purple-500/10" },
+                          { title: "Roles & Permissions", desc: "View security groups", icon: Shield, action: "System Control", color: "border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/10" },
+                          { title: "System Settings", desc: "View core settings config", icon: Settings, action: "System Control", color: "border-amber-500/30 text-amber-300 hover:bg-amber-500/10" },
+                          { title: "Audit Log Feed", desc: "Trace user logs stream", icon: FileText, action: "System Control", color: "border-blue-500/30 text-blue-300 hover:bg-blue-500/10" }
                         ].map((btn, index) => {
                           const IconComponent = btn.icon;
                           return (
                             <button
                               key={index}
-                              onClick={() => setActiveTab(btn.action)}
-                              className={`p-4 rounded-xl border bg-slate-900/40 text-left transition-all duration-300 hover:scale-102 flex flex-col gap-2 cursor-pointer ${btn.color}`}
+                              onClick={() => {
+                                setActiveTab(btn.action);
+                                triggerToast(`Redirecting to ${btn.title}`, "info");
+                              }}
+                              className={`p-4 rounded-xl border bg-slate-900/60 text-left transition-all duration-300 hover:scale-103 flex flex-col gap-2 cursor-pointer ${btn.color}`}
                             >
-                              <IconComponent className="h-5 w-5" />
+                              <IconComponent className="h-5 w-5 shrink-0" />
                               <div>
                                 <div className="text-xs font-bold text-white">{btn.title}</div>
-                                <div className="text-[10px] text-slate-500 mt-0.5">{btn.desc}</div>
+                                <div className="text-[10px] text-slate-300 mt-0.5 leading-snug">{btn.desc}</div>
                               </div>
                             </button>
                           );
@@ -904,9 +1059,9 @@ export default function Home() {
                       </div>
 
                       {/* Small Live stats chart summary */}
-                      <div className="mt-6 p-4 rounded-xl bg-slate-900/50 border border-white/5 space-y-3">
-                        <div className="flex items-center justify-between text-xs font-semibold">
-                          <span className="text-slate-400">Database Connection Pool</span>
+                      <div className="mt-6 p-4 rounded-xl bg-slate-900 border border-white/5 space-y-3">
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <span className="text-slate-300">Database Connection Pool</span>
                           <span className="text-green-400">Healthy (100%)</span>
                         </div>
                         <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
@@ -919,38 +1074,47 @@ export default function Home() {
               )}
 
               {/* ========================================= */}
-              {/* TAB 2: USER MANAGEMENT */}
+              {/* TAB 2: USER DIRECTORY */}
               {/* ========================================= */}
               {activeTab === "Users" && (
                 <div className="space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h2 className="text-2xl font-bold text-white">Users Directory</h2>
-                      <p className="text-sm text-slate-400">Add, edit, or suspend security logins from the platform.</p>
+                      <p className="text-sm text-slate-350">Add, edit, or suspend security logins from the platform.</p>
                     </div>
-                    <Button 
-                      onClick={() => setShowAddUserModal(true)} 
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-2.5 shadow-lg shadow-indigo-600/15 flex items-center gap-2 border border-indigo-400/20 cursor-pointer"
-                    >
-                      <Plus className="h-4.5 w-4.5" />
-                      Add New Account
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => handleExportCSV("users")}
+                        className="h-10 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:text-white px-4 text-xs font-bold flex items-center gap-2 cursor-pointer"
+                      >
+                        <FileSpreadsheet className="h-4 w-4" />
+                        Export Users (CSV)
+                      </Button>
+                      <Button 
+                        onClick={() => setShowAddUserModal(true)} 
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-2.5 shadow-lg shadow-indigo-600/15 flex items-center gap-2 border border-indigo-400/20 cursor-pointer text-xs"
+                      >
+                        <Plus className="h-4.5 w-4.5" />
+                        Add New Account
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Filter and Search Bar */}
-                  <div className="p-4 rounded-xl border border-slate-800 bg-[#0c1220]/80 flex flex-wrap gap-4 items-center justify-between">
+                  <div className="p-4 rounded-xl border border-slate-800 bg-[#0c1220] flex flex-wrap gap-4 items-center justify-between">
                     <div className="relative flex-1 max-w-md">
-                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                       <input
                         type="text"
                         placeholder="Search users by name, email, or role..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                        className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-semibold"
                       />
                     </div>
                     
-                    <div className="text-xs text-indigo-400 font-semibold bg-indigo-500/5 border border-indigo-500/10 px-3 py-1.5 rounded-lg">
+                    <div className="text-xs text-indigo-300 font-extrabold bg-indigo-500/5 border border-indigo-500/25 px-3 py-1.5 rounded-lg">
                       Showing {users.filter(u => u.name.toLowerCase().includes(searchQuery.toLowerCase()) || u.role.toLowerCase().includes(searchQuery.toLowerCase())).length} of {users.length} Users
                     </div>
                   </div>
@@ -960,7 +1124,7 @@ export default function Home() {
                     <div className="overflow-x-auto custom-scrollbar">
                       <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="border-b border-slate-800 text-slate-500 text-xs font-semibold bg-slate-900/40">
+                          <tr className="border-b border-slate-800 text-slate-200 text-xs font-extrabold bg-slate-900">
                             <th className="p-4">User Details</th>
                             <th className="p-4">Access Role</th>
                             <th className="p-4">Status</th>
@@ -975,40 +1139,40 @@ export default function Home() {
                               <tr key={user.id} className="hover:bg-slate-900/30 transition-colors">
                                 <td className="p-4">
                                   <div className="flex items-center gap-3">
-                                    <Avatar className="h-9 w-9 rounded-xl border border-slate-800 bg-slate-950 text-slate-300 font-bold text-xs flex items-center justify-center">
+                                    <Avatar className="h-9 w-9 rounded-xl border border-slate-800 bg-slate-950 text-slate-200 font-bold text-xs flex items-center justify-center">
                                       <AvatarFallback>{user.avatar}</AvatarFallback>
                                     </Avatar>
                                     <div>
                                       <div className="font-bold text-white">{user.name}</div>
-                                      <div className="text-slate-500 text-[10px]">{user.email}</div>
+                                      <div className="text-slate-350 text-[10px] font-semibold">{user.email}</div>
                                     </div>
                                   </div>
                                 </td>
                                 <td className="p-4">
-                                  <Badge className="bg-slate-900 border-slate-800 text-slate-300 font-semibold">{user.role}</Badge>
+                                  <Badge className="bg-slate-900 border-slate-850 text-slate-200 font-bold">{user.role}</Badge>
                                 </td>
                                 <td className="p-4">
                                   <Badge className={
                                     user.status === "Active" 
-                                      ? "bg-green-500/10 border-green-500/20 text-green-400 font-semibold"
+                                      ? "bg-green-500/10 border-green-500/30 text-green-300 font-bold"
                                       : user.status === "Inactive"
-                                      ? "bg-slate-800 border-slate-700 text-slate-400 font-semibold"
-                                      : "bg-rose-500/10 border-rose-500/20 text-rose-400 font-semibold"
+                                      ? "bg-slate-800 border-slate-700 text-slate-350 font-bold"
+                                      : "bg-rose-500/10 border-rose-500/30 text-rose-300 font-bold"
                                   }>
                                     {user.status}
                                   </Badge>
                                 </td>
-                                <td className="p-4 text-slate-400">{user.lastActive}</td>
+                                <td className="p-4 text-slate-300 font-semibold">{user.lastActive}</td>
                                 <td className="p-4 text-right space-x-2">
                                   <Button 
                                     onClick={() => toggleUserStatus(user.id, user.status, user.name)}
-                                    className="h-8 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white px-2.5 text-[10px] cursor-pointer"
+                                    className="h-8 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 hover:text-white px-2.5 text-[10px] font-bold cursor-pointer"
                                   >
                                     {user.status === "Active" ? "Deactivate" : "Activate"}
                                   </Button>
                                   <button 
                                     onClick={() => handleDeleteUser(user.id, user.name)}
-                                    className="p-2 rounded-lg border border-slate-800 hover:border-rose-500/30 hover:bg-rose-500/5 text-slate-400 hover:text-rose-400 transition-all inline-flex items-center justify-center cursor-pointer"
+                                    className="p-2 rounded-lg border border-slate-800 hover:border-rose-500/40 hover:bg-rose-500/10 text-slate-350 hover:text-rose-300 transition-all inline-flex items-center justify-center cursor-pointer"
                                   >
                                     <Trash2 className="h-3.5 w-3.5" />
                                   </button>
@@ -1026,41 +1190,41 @@ export default function Home() {
                       <Card className="w-full max-w-md border-slate-800 bg-[#0c1220] p-6 shadow-2xl space-y-4">
                         <CardHeader className="p-0">
                           <CardTitle className="text-lg font-bold text-white">Create Security Account</CardTitle>
-                          <CardDescription className="text-slate-400 text-xs mt-1">Specify user details and permission boundaries.</CardDescription>
+                          <CardDescription className="text-slate-350 text-xs mt-1">Specify user details and permission boundaries.</CardDescription>
                         </CardHeader>
 
-                        <form onSubmit={handleAddUser} className="space-y-4 pt-2">
+                        <form onSubmit={handleAddUser} className="space-y-4 pt-2 text-left">
                           <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-slate-400">Full Name</label>
+                            <label className="text-xs font-bold text-slate-300">Full Name</label>
                             <input
                               type="text"
                               required
                               value={newUser.name}
                               onChange={(e) => setNewUser({...newUser, name: e.target.value})}
                               placeholder="e.g. Liam Anderson"
-                              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-650 focus:outline-none focus:border-indigo-500 font-semibold"
                             />
                           </div>
 
                           <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-slate-400">Email Address</label>
+                            <label className="text-xs font-bold text-slate-300">Email Address</label>
                             <input
                               type="email"
                               required
                               value={newUser.email}
                               onChange={(e) => setNewUser({...newUser, email: e.target.value})}
                               placeholder="e.g. liam.anderson@neuravixor.com"
-                              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-650 focus:outline-none focus:border-indigo-500 font-semibold"
                             />
                           </div>
 
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-slate-400">Access Level</label>
+                              <label className="text-xs font-bold text-slate-300">Access Level</label>
                               <select
                                 value={newUser.role}
                                 onChange={(e) => setNewUser({...newUser, role: e.target.value})}
-                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold"
                               >
                                 <option>Admin</option>
                                 <option>Manager</option>
@@ -1070,11 +1234,11 @@ export default function Home() {
                             </div>
 
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-slate-400">Status</label>
+                              <label className="text-xs font-bold text-slate-300">Status</label>
                               <select
                                 value={newUser.status}
                                 onChange={(e) => setNewUser({...newUser, status: e.target.value as any})}
-                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold"
                               >
                                 <option>Active</option>
                                 <option>Inactive</option>
@@ -1087,7 +1251,7 @@ export default function Home() {
                             <Button 
                               type="button" 
                               onClick={() => setShowAddUserModal(false)}
-                              className="h-9 px-4 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white text-xs cursor-pointer"
+                              className="h-9 px-4 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs cursor-pointer font-bold"
                             >
                               Cancel
                             </Button>
@@ -1113,31 +1277,40 @@ export default function Home() {
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h2 className="text-2xl font-bold text-white">Tasks Tracker</h2>
-                      <p className="text-sm text-slate-400">Manage security schedules, audits, and deployment queues.</p>
+                      <p className="text-sm text-slate-350">Manage security schedules, audits, and deployment queues.</p>
                     </div>
-                    <Button 
-                      onClick={() => setShowAddTaskModal(true)} 
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-2.5 shadow-lg shadow-indigo-600/15 flex items-center gap-2 border border-indigo-400/20 cursor-pointer"
-                    >
-                      <Plus className="h-4.5 w-4.5" />
-                      Create New Task
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={() => handleExportCSV("tasks")}
+                        className="h-10 rounded-xl bg-slate-900 border border-slate-800 text-slate-200 hover:text-white px-4 text-xs font-bold flex items-center gap-2 cursor-pointer"
+                      >
+                        <FileSpreadsheet className="h-4 w-4" />
+                        Export Tasks (CSV)
+                      </Button>
+                      <Button 
+                        onClick={() => setShowAddTaskModal(true)} 
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-2.5 shadow-lg shadow-indigo-600/15 flex items-center gap-2 border border-indigo-400/20 cursor-pointer text-xs"
+                      >
+                        <Plus className="h-4.5 w-4.5" />
+                        Create New Task
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Filter / search panel */}
-                  <div className="p-4 rounded-xl border border-slate-800 bg-[#0c1220]/80 flex flex-wrap gap-4 items-center justify-between">
+                  <div className="p-4 rounded-xl border border-slate-800 bg-[#0c1220] flex flex-wrap gap-4 items-center justify-between">
                     <div className="relative flex-1 max-w-md">
-                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
                       <input
                         type="text"
                         placeholder="Search tasks by title, category, or assignee..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500"
+                        className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-900 border border-slate-800 text-sm text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-indigo-500 font-semibold"
                       />
                     </div>
                     
-                    <div className="text-xs text-indigo-400 font-semibold bg-indigo-500/5 border border-indigo-500/10 px-3 py-1.5 rounded-lg">
+                    <div className="text-xs text-indigo-300 font-extrabold bg-indigo-500/5 border border-indigo-500/25 px-3 py-1.5 rounded-lg">
                       {tasks.filter(t => t.status === "In Progress").length} Tasks In Progress
                     </div>
                   </div>
@@ -1147,7 +1320,7 @@ export default function Home() {
                     <div className="overflow-x-auto custom-scrollbar">
                       <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="border-b border-slate-800 text-slate-500 text-xs font-semibold bg-slate-900/40">
+                          <tr className="border-b border-slate-800 text-slate-200 text-xs font-extrabold bg-slate-900">
                             <th className="p-4">Task ID</th>
                             <th className="p-4">Task Title</th>
                             <th className="p-4">Category</th>
@@ -1163,21 +1336,21 @@ export default function Home() {
                             .filter(t => t.title.toLowerCase().includes(searchQuery.toLowerCase()) || t.assignee.toLowerCase().includes(searchQuery.toLowerCase()) || t.category.toLowerCase().includes(searchQuery.toLowerCase()))
                             .map((task) => (
                               <tr key={task.id} className="hover:bg-slate-900/30 transition-colors">
-                                <td className="p-4 font-mono text-[10px] text-slate-500">{task.id}</td>
+                                <td className="p-4 font-mono text-[10px] text-slate-450 font-bold">{task.id}</td>
                                 <td className="p-4 font-bold text-white">{task.title}</td>
                                 <td className="p-4">
-                                  <Badge className="bg-slate-900 border-slate-800 text-slate-400 font-medium">{task.category}</Badge>
+                                  <Badge className="bg-slate-900 border-slate-800 text-slate-300 font-semibold">{task.category}</Badge>
                                 </td>
-                                <td className="p-4 text-slate-300 font-semibold">{task.assignee}</td>
+                                <td className="p-4 text-slate-200 font-bold">{task.assignee}</td>
                                 <td className="p-4">
                                   <Badge className={
                                     task.priority === "Critical" 
-                                      ? "bg-rose-500/10 border-rose-500/20 text-rose-400 font-bold"
+                                      ? "bg-rose-500/10 border-rose-500/30 text-rose-300 font-extrabold"
                                       : task.priority === "High"
-                                      ? "bg-amber-500/10 border-amber-500/20 text-amber-400 font-semibold"
+                                      ? "bg-amber-500/10 border-amber-500/30 text-amber-300 font-bold"
                                       : task.priority === "Medium"
-                                      ? "bg-blue-500/10 border-blue-500/20 text-blue-400 font-medium"
-                                      : "bg-slate-800 border-slate-700 text-slate-400"
+                                      ? "bg-blue-500/10 border-blue-500/30 text-blue-300 font-bold"
+                                      : "bg-slate-800 border-slate-700 text-slate-350"
                                   }>
                                     {task.priority}
                                   </Badge>
@@ -1186,7 +1359,7 @@ export default function Home() {
                                   <select
                                     value={task.status}
                                     onChange={(e) => handleUpdateTaskStatus(task.id, task.title, e.target.value as any)}
-                                    className="bg-slate-900 border border-slate-800 text-xs rounded-lg px-2 py-1 text-slate-300 focus:outline-none focus:border-indigo-500 font-semibold"
+                                    className="bg-slate-900 border border-slate-800 text-xs rounded-lg px-2 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-extrabold cursor-pointer"
                                   >
                                     <option>Pending</option>
                                     <option>In Progress</option>
@@ -1194,11 +1367,11 @@ export default function Home() {
                                     <option>Overdue</option>
                                   </select>
                                 </td>
-                                <td className="p-4 text-slate-400">{task.dueDate}</td>
+                                <td className="p-4 text-slate-300 font-semibold">{task.dueDate}</td>
                                 <td className="p-4 text-right">
                                   <Button 
                                     onClick={() => handleUpdateTaskStatus(task.id, task.title, "Completed")}
-                                    className="h-8 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/25 px-2.5 text-[10px] font-bold cursor-pointer"
+                                    className="h-8 rounded-lg bg-green-500/10 border border-green-500/30 text-green-300 hover:bg-green-500/25 px-2.5 text-[10px] font-extrabold cursor-pointer"
                                     disabled={task.status === "Completed"}
                                   >
                                     Complete
@@ -1217,29 +1390,29 @@ export default function Home() {
                       <Card className="w-full max-w-md border-slate-800 bg-[#0c1220] p-6 shadow-2xl space-y-4">
                         <CardHeader className="p-0">
                           <CardTitle className="text-lg font-bold text-white">Create Security Task</CardTitle>
-                          <CardDescription className="text-slate-400 text-xs mt-1">Specify task objective and resource routing.</CardDescription>
+                          <CardDescription className="text-slate-350 text-xs mt-1">Specify task objective and resource routing.</CardDescription>
                         </CardHeader>
 
-                        <form onSubmit={handleAddTask} className="space-y-4 pt-2">
+                        <form onSubmit={handleAddTask} className="space-y-4 pt-2 text-left">
                           <div className="space-y-1.5">
-                            <label className="text-xs font-semibold text-slate-400">Task Title</label>
+                            <label className="text-xs font-bold text-slate-300">Task Title</label>
                             <input
                               type="text"
                               required
                               value={newTask.title}
                               onChange={(e) => setNewTask({...newTask, title: e.target.value})}
                               placeholder="e.g. Implement API rate limit headers"
-                              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                              className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-650 focus:outline-none focus:border-indigo-500 font-semibold"
                             />
                           </div>
 
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-slate-400">Assignee</label>
+                              <label className="text-xs font-bold text-slate-300">Assignee</label>
                               <select
                                 value={newTask.assignee}
                                 onChange={(e) => setNewTask({...newTask, assignee: e.target.value})}
-                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold"
                               >
                                 <option value="">Select Assignee</option>
                                 {users.map(u => (
@@ -1249,25 +1422,25 @@ export default function Home() {
                             </div>
 
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-slate-400">Category</label>
+                              <label className="text-xs font-bold text-slate-300">Category</label>
                               <input
                                 type="text"
                                 required
                                 value={newTask.category}
                                 onChange={(e) => setNewTask({...newTask, category: e.target.value})}
                                 placeholder="e.g. Security, Dev"
-                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 placeholder:text-slate-655 focus:outline-none focus:border-indigo-500 font-semibold"
                               />
                             </div>
                           </div>
 
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-slate-400">Priority</label>
+                              <label className="text-xs font-bold text-slate-300">Priority</label>
                               <select
                                 value={newTask.priority}
                                 onChange={(e) => setNewTask({...newTask, priority: e.target.value as any})}
-                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold"
                               >
                                 <option>Critical</option>
                                 <option>High</option>
@@ -1277,11 +1450,11 @@ export default function Home() {
                             </div>
 
                             <div className="space-y-1.5">
-                              <label className="text-xs font-semibold text-slate-400">Initial Status</label>
+                              <label className="text-xs font-bold text-slate-300">Initial Status</label>
                               <select
                                 value={newTask.status}
                                 onChange={(e) => setNewTask({...newTask, status: e.target.value as any})}
-                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500"
+                                className="w-full px-3 py-2 text-xs rounded-lg bg-slate-900 border border-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500 font-semibold"
                               >
                                 <option>Pending</option>
                                 <option>In Progress</option>
@@ -1293,7 +1466,7 @@ export default function Home() {
                             <Button 
                               type="button" 
                               onClick={() => setShowAddTaskModal(false)}
-                              className="h-9 px-4 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white text-xs cursor-pointer"
+                              className="h-9 px-4 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs cursor-pointer font-bold"
                             >
                               Cancel
                             </Button>
@@ -1312,18 +1485,18 @@ export default function Home() {
               )}
 
               {/* ========================================= */}
-              {/* TAB 4: REPORTS GENERATOR */}
+              {/* TAB 4: SYSTEM REPORTS */}
               {/* ========================================= */}
               {activeTab === "Reports" && (
                 <div className="space-y-6">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h2 className="text-2xl font-bold text-white">System Reports</h2>
-                      <p className="text-sm text-slate-400">Generate, schedule, or download system compliance reports.</p>
+                      <p className="text-sm text-slate-350">Generate, schedule, or download system compliance reports.</p>
                     </div>
                     <Button 
                       onClick={handleGenerateReport} 
-                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-2.5 shadow-lg shadow-indigo-600/15 flex items-center gap-2 border border-indigo-400/20 cursor-pointer"
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl px-4 py-2.5 shadow-lg shadow-indigo-600/15 flex items-center gap-2 border border-indigo-400/20 cursor-pointer text-xs"
                       disabled={isGeneratingReport}
                     >
                       <RefreshCcw className={`h-4.5 w-4.5 ${isGeneratingReport ? "animate-spin" : ""}`} />
@@ -1332,8 +1505,8 @@ export default function Home() {
                   </div>
 
                   {isGeneratingReport && (
-                    <div className="p-6 rounded-xl border border-indigo-500/20 bg-indigo-500/5 space-y-3">
-                      <div className="flex items-center justify-between text-xs font-bold text-indigo-400">
+                    <div className="p-6 rounded-xl border border-indigo-500/35 bg-indigo-500/10 space-y-3">
+                      <div className="flex items-center justify-between text-xs font-bold text-indigo-300">
                         <span>Compiling security metrics and event logs...</span>
                         <span>{reportProgress}%</span>
                       </div>
@@ -1348,22 +1521,25 @@ export default function Home() {
                     {reports
                       .filter(r => r.title.toLowerCase().includes(searchQuery.toLowerCase()))
                       .map((report) => (
-                        <div key={report.id} className="p-6 rounded-2xl border border-slate-800 bg-[#0c1220]/80 shadow-xl flex flex-col justify-between hover:border-slate-700 transition-all group">
+                        <div key={report.id} className="glass-panel p-6 rounded-2xl border border-slate-800 shadow-xl flex flex-col justify-between hover:border-indigo-500/35 transition-all group">
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
-                              <Badge className="bg-slate-900 border-slate-800 text-slate-400 font-semibold">{report.type}</Badge>
-                              <span className="text-[10px] text-slate-500 font-medium">{report.date}</span>
+                              <Badge className="bg-slate-900 border-slate-800 text-slate-300 font-bold">{report.type}</Badge>
+                              <span className="text-[10px] text-slate-400 font-semibold">{report.date}</span>
                             </div>
                             
-                            <h3 className="text-sm font-bold text-white leading-snug group-hover:text-indigo-400 transition-colors">{report.title}</h3>
-                            <p className="text-[10px] text-slate-500">Author: {report.author}</p>
+                            <h3 className="text-sm font-bold text-white leading-snug group-hover:text-indigo-300 transition-colors">{report.title}</h3>
+                            <p className="text-[10px] text-slate-400 font-semibold">Author: {report.author}</p>
                           </div>
 
                           <div className="border-t border-slate-800/80 mt-6 pt-4 flex items-center justify-between text-xs">
-                            <span className="text-slate-400 font-semibold">{report.size}</span>
+                            <span className="text-slate-200 font-extrabold">{report.size}</span>
                             <Button 
-                              onClick={() => addAuditLog(`Downloaded report: "${report.title}"`)}
-                              className="h-8 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white px-3 text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
+                              onClick={() => {
+                                addAuditLog(`Downloaded report: "${report.title}"`);
+                                triggerToast(`Downloaded "${report.title.slice(0, 15)}..."`, "success");
+                              }}
+                              className="h-8 rounded-lg bg-slate-900 border border-slate-800 text-slate-200 hover:text-white px-3 text-[10px] font-bold flex items-center gap-1.5 cursor-pointer"
                             >
                               <Download className="h-3.5 w-3.5" />
                               Download File
@@ -1382,23 +1558,24 @@ export default function Home() {
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-2xl font-bold text-white">Workflows Pipeline</h2>
-                    <p className="text-sm text-slate-400">Track and step through automated orchestration workflows.</p>
+                    <p className="text-sm text-slate-350">Track and step through automated orchestration workflows.</p>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left: Interactive Workflow Runner */}
-                    <Card className="lg:col-span-2 border-slate-800 bg-[#0c1220]/80 shadow-xl p-6">
+                    <Card className="glass-panel lg:col-span-2 border-slate-800 shadow-xl p-6">
                       <div className="flex items-center justify-between mb-6">
                         <div>
                           <h3 className="text-base font-bold text-white">Onboarding Flow Simulation</h3>
-                          <p className="text-xs text-slate-500 mt-0.5">Click steps to advance the automated process.</p>
+                          <p className="text-xs text-slate-350 mt-0.5">Click steps to advance the automated process.</p>
                         </div>
                         <Button 
                           onClick={() => {
                             setWorkflowSteps(initialWorkflowSteps);
                             addAuditLog("Reset onboarding workflow simulation", "System");
+                            triggerToast("Onboarding workflow simulation reset", "info");
                           }}
-                          className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-indigo-400 hover:text-indigo-300 px-3 text-xs cursor-pointer"
+                          className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-indigo-300 hover:text-indigo-200 px-3 text-xs cursor-pointer font-bold"
                         >
                           Reset Simulation
                         </Button>
@@ -1414,10 +1591,10 @@ export default function Home() {
                               <div className="flex flex-col items-center">
                                 <div className={`h-8 w-8 rounded-full border-2 flex items-center justify-center font-bold text-sm ${
                                   isCompleted 
-                                    ? "border-green-500 bg-green-500/10 text-green-400" 
+                                    ? "border-green-500 bg-green-500/10 text-green-300" 
                                     : isInProgress 
-                                    ? "border-blue-500 bg-blue-500/10 text-blue-400 ring-4 ring-blue-500/15" 
-                                    : "border-slate-800 bg-slate-900 text-slate-500"
+                                    ? "border-blue-500 bg-blue-500/10 text-blue-300 ring-4 ring-blue-500/15" 
+                                    : "border-slate-800 bg-slate-900 text-slate-400"
                                 }`}>
                                   {isCompleted ? "✓" : index + 1}
                                 </div>
@@ -1426,19 +1603,19 @@ export default function Home() {
                                 )}
                               </div>
                               
-                              <div className="flex-1 p-4 rounded-xl border border-white/5 bg-slate-900/40 flex items-center justify-between">
+                              <div className="flex-1 p-4 rounded-xl border border-white/5 bg-slate-900/60 flex items-center justify-between">
                                 <div className="space-y-1">
                                   <div className="text-sm font-bold text-white">{step.name}</div>
-                                  <div className="text-xs text-slate-500">Updated: {step.time}</div>
+                                  <div className="text-xs text-slate-400 mt-0.5">Updated: {step.time}</div>
                                 </div>
                                 
                                 <div className="flex items-center gap-3">
                                   <Badge className={
                                     isCompleted 
-                                      ? "bg-green-500/10 border-green-500/30 text-green-400" 
+                                      ? "bg-green-500/10 border-green-500/30 text-green-300 font-bold" 
                                       : isInProgress 
-                                      ? "bg-blue-500/10 border-blue-500/30 text-blue-400" 
-                                      : "bg-slate-800 border-slate-700 text-slate-400"
+                                      ? "bg-blue-500/10 border-blue-500/30 text-blue-300 font-bold" 
+                                      : "bg-slate-900 border-slate-750 text-slate-400 font-semibold"
                                   }>
                                     {step.status}
                                   </Badge>
@@ -1446,7 +1623,7 @@ export default function Home() {
                                   {!isCompleted && (
                                     <Button 
                                       onClick={() => handleAdvanceWorkflow(index)}
-                                      className="h-8 rounded-lg bg-slate-850 hover:bg-slate-800 border border-slate-750 text-white px-3 text-[10px] font-bold cursor-pointer"
+                                      className="h-8 rounded-lg bg-slate-850 hover:bg-slate-805 border border-slate-700 text-white px-3 text-[10px] font-bold cursor-pointer"
                                     >
                                       {isInProgress ? "Complete Step" : "Activate"}
                                     </Button>
@@ -1464,25 +1641,25 @@ export default function Home() {
                       {workflows.map((flow) => {
                         const progressPercent = Math.round((flow.completedSteps / flow.steps) * 100);
                         return (
-                          <Card key={flow.id} className="border-slate-800 bg-[#0c1220]/80 shadow-xl p-6 space-y-4">
+                          <Card key={flow.id} className="glass-panel border-slate-800 shadow-xl p-6 space-y-4">
                             <div className="flex items-start justify-between">
                               <div>
                                 <h4 className="text-sm font-bold text-white">{flow.name}</h4>
-                                <span className="text-[10px] text-slate-500 font-medium">Assignee: {flow.assignee}</span>
+                                <span className="text-[10px] text-slate-400 font-semibold">Assignee: {flow.assignee}</span>
                               </div>
                               <Badge className={
                                 flow.status === "Active"
-                                  ? "bg-green-500/10 border-green-500/30 text-green-400 font-semibold"
+                                  ? "bg-green-500/10 border-green-500/30 text-green-300 font-bold"
                                   : flow.status === "Paused"
-                                  ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-400 font-semibold"
-                                  : "bg-blue-500/10 border-blue-500/30 text-blue-400 font-semibold"
+                                  ? "bg-yellow-500/10 border-yellow-500/30 text-yellow-300 font-bold"
+                                  : "bg-blue-500/10 border-blue-500/30 text-blue-300 font-bold"
                               }>
                                 {flow.status}
                               </Badge>
                             </div>
 
                             <div className="space-y-2">
-                              <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
+                              <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
                                 <span>Progress</span>
                                 <span>{flow.completedSteps}/{flow.steps} Steps ({progressPercent}%)</span>
                               </div>
@@ -1491,7 +1668,7 @@ export default function Home() {
                               </div>
                             </div>
 
-                            <div className="border-t border-slate-800/80 pt-3 flex items-center justify-between text-[10px] text-slate-500">
+                            <div className="border-t border-slate-800/80 pt-3 flex items-center justify-between text-[10px] text-slate-450 font-bold">
                               <span>Last Run: {flow.lastRun}</span>
                               <span>Next Run: {flow.nextRun}</span>
                             </div>
@@ -1504,21 +1681,123 @@ export default function Home() {
               )}
 
               {/* ========================================= */}
-              {/* TAB 6: SYSTEM CONTROL (SETTINGS & LOGS) */}
+              {/* TAB 6: SYSTEM CONTROL (SETTINGS & MATRIX & LOGS) */}
               {/* ========================================= */}
               {activeTab === "System Control" && (
                 <div className="space-y-6">
                   <div>
                     <h2 className="text-2xl font-bold text-white">System Control Panel</h2>
-                    <p className="text-sm text-slate-400">Configure global security switches and trace system actions in real-time.</p>
+                    <p className="text-sm text-slate-350">Configure global settings policies, edit role-based access grids, and review audit trails.</p>
+                  </div>
+
+                  {/* 1. INTERACTIVE ROLES & PERMISSIONS MATRIX */}
+                  <Card className="glass-panel border-slate-800 shadow-xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <ShieldCheck className="h-5 w-5 text-indigo-400" />
+                      <h3 className="text-base font-bold text-white">Role Permission Configuration Matrix</h3>
+                    </div>
+                    <p className="text-xs text-slate-350 mb-6">Dynamically toggle access permissions across roles. Changes update system configurations in real-time.</p>
+
+                    <div className="overflow-x-auto custom-scrollbar border border-slate-800 rounded-xl">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-800 text-slate-200 font-extrabold bg-slate-900/60">
+                            <th className="p-4">Permission Name / ID</th>
+                            <th className="p-4 text-center">Administrator</th>
+                            <th className="p-4 text-center">Manager</th>
+                            <th className="p-4 text-center">Editor</th>
+                            <th className="p-4 text-center">Viewer</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/50">
+                          {Object.keys(permissions).map((permKey) => {
+                            const rolesMapping = permissions[permKey as keyof typeof permissions];
+                            return (
+                              <tr key={permKey} className="hover:bg-slate-900/20 transition-colors">
+                                <td className="p-4 font-bold text-white">{permKey}</td>
+                                {Object.keys(rolesMapping).map((roleKey) => {
+                                  const isAllowed = rolesMapping[roleKey as keyof typeof rolesMapping];
+                                  return (
+                                    <td key={roleKey} className="p-4 text-center">
+                                      <button
+                                        onClick={() => handleTogglePermission(permKey, roleKey)}
+                                        className={`mx-auto h-6 w-6 rounded-lg flex items-center justify-center border transition-all cursor-pointer ${
+                                          isAllowed 
+                                            ? "border-green-500/40 bg-green-500/10 text-green-300" 
+                                            : "border-slate-800 bg-slate-950 text-slate-600 hover:border-slate-700"
+                                        }`}
+                                      >
+                                        {isAllowed ? <Check className="h-3.5 w-3.5" /> : <X className="h-3.5 w-3.5 opacity-30" />}
+                                      </button>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </Card>
+
+                  {/* 2. ADVANCED HARDWARE METRICS DIALS */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {[
+                      { name: "CPU Utilization", value: serverLoad.cpu, max: 100, unit: "%", icon: Cpu, color: "text-blue-400 stroke-blue-500" },
+                      { name: "Memory Consumption", value: serverLoad.memory, max: 100, unit: "%", icon: Database, color: "text-indigo-400 stroke-indigo-500" },
+                      { name: "Local Disk Space", value: serverLoad.disk, max: 100, unit: "%", icon: Activity, color: "text-purple-400 stroke-purple-500" }
+                    ].map((metric, i) => {
+                      const radius = 35;
+                      const circumference = 2 * Math.PI * radius;
+                      const strokeDashoffset = circumference - (metric.value / metric.max) * circumference;
+                      const IconComp = metric.icon;
+
+                      return (
+                        <Card key={i} className="glass-panel border-slate-800 shadow-xl p-5 flex items-center gap-5">
+                          {/* Radial Progress Ring */}
+                          <div className="relative h-20 w-20 shrink-0">
+                            <svg className="h-full w-full rotate-[-90deg]">
+                              {/* Background ring */}
+                              <circle 
+                                cx="40" 
+                                cy="40" 
+                                r={radius} 
+                                className="fill-transparent stroke-slate-800 stroke-[6]"
+                              />
+                              {/* Foreground ring */}
+                              <circle 
+                                cx="40" 
+                                cy="40" 
+                                r={radius} 
+                                className={`fill-transparent stroke-[6] transition-all duration-1000 ${metric.color}`}
+                                strokeDasharray={circumference}
+                                strokeDashoffset={strokeDashoffset}
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                            <div className="absolute inset-0 flex flex-col items-center justify-center font-bold text-sm text-white">
+                              {metric.value}{metric.unit}
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
+                              <IconComp className="h-3.5 w-3.5 text-slate-400" />
+                              {metric.name}
+                            </div>
+                            <p className="text-[10px] text-slate-450 leading-relaxed font-semibold">Active monitor running. Dynamic simulation updating logs periodically.</p>
+                          </div>
+                        </Card>
+                      );
+                    })}
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
                     {/* Left: Settings Panel toggles */}
-                    <Card className="lg:col-span-5 border-slate-800 bg-[#0c1220]/80 shadow-xl p-6 space-y-6 h-fit">
+                    <Card className="lg:col-span-5 border-slate-800 bg-[#0c1220] shadow-xl p-6 space-y-6 h-fit">
                       <div>
-                        <h3 className="text-base font-bold text-white">Security Switches</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Toggle global access states.</p>
+                        <h3 className="text-base font-bold text-white">Global Switches</h3>
+                        <p className="text-xs text-slate-350 mt-0.5">Toggle global access states.</p>
                       </div>
 
                       <div className="space-y-4 divide-y divide-slate-800/60">
@@ -1526,13 +1805,13 @@ export default function Home() {
                           <div key={index} className="flex items-center justify-between pt-4 first:pt-0">
                             <div>
                               <div className="text-xs font-bold text-white">{setting.label}</div>
-                              <div className="text-[10px] text-slate-500 mt-0.5">Category: {setting.category}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5 font-semibold">Category: {setting.category}</div>
                             </div>
                             
                             <button
                               onClick={() => handleToggleSetting(setting.label, setting.enabled)}
                               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none cursor-pointer ${
-                                setting.enabled ? "bg-indigo-600" : "bg-slate-800"
+                                setting.enabled ? "bg-indigo-600" : "bg-slate-850"
                               }`}
                             >
                               <span
@@ -1547,39 +1826,49 @@ export default function Home() {
                     </Card>
 
                     {/* Right: Real-time audit logs feed */}
-                    <Card className="lg:col-span-7 border-slate-800 bg-[#0c1220]/80 shadow-xl p-6 flex flex-col justify-between">
+                    <Card className="lg:col-span-7 border-slate-800 bg-[#0c1220] shadow-xl p-6 flex flex-col justify-between">
                       <div className="flex items-center justify-between mb-6">
                         <div>
                           <h3 className="text-base font-bold text-white">Audit Trail Logs</h3>
-                          <p className="text-xs text-slate-500 mt-0.5">Secured log pipeline output.</p>
+                          <p className="text-xs text-slate-350 mt-0.5">Secured log pipeline output.</p>
                         </div>
-                        <Button
-                          onClick={() => {
-                            setAuditLogs([]);
-                            addAuditLog("Cleared local audit trail logs", "Administrator", "Warning");
-                          }}
-                          className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-400 hover:text-white px-3 text-xs cursor-pointer"
-                        >
-                          Clear Feed
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            onClick={() => handleExportCSV("logs")}
+                            className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:text-white px-2.5 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Export CSV
+                          </Button>
+                          <Button
+                            onClick={() => {
+                              setAuditLogs([]);
+                              addAuditLog("Cleared local audit trail logs", "Administrator", "Warning");
+                              triggerToast("Audit logs cleared", "warning");
+                            }}
+                            className="h-8 rounded-lg border border-slate-800 bg-slate-900 text-slate-300 hover:text-white px-3 text-xs cursor-pointer font-bold"
+                          >
+                            Clear Feed
+                          </Button>
+                        </div>
                       </div>
 
-                      <div className="flex-1 min-h-[350px] max-h-[480px] overflow-y-auto custom-scrollbar border border-slate-800/80 rounded-xl bg-slate-950/40 p-4 space-y-3 font-mono text-[11px] leading-relaxed">
+                      <div className="flex-1 min-h-[350px] max-h-[480px] overflow-y-auto custom-scrollbar border border-slate-850 rounded-xl bg-slate-950 p-4 space-y-3 font-mono text-[11px] leading-relaxed">
                         {auditLogs.length === 0 ? (
                           <div className="text-slate-600 italic text-center py-10">No security audit logs recorded yet.</div>
                         ) : (
                           auditLogs.map((log) => (
-                            <div key={log.id} className="flex gap-2 text-slate-400 border-b border-slate-900 pb-2 last:border-0 last:pb-0 font-mono">
+                            <div key={log.id} className="flex gap-2 text-slate-300 border-b border-slate-900 pb-2 last:border-0 last:pb-0 font-mono">
                               <span className="text-indigo-400 shrink-0">[{log.timestamp}]</span>
                               <span className="text-slate-500 shrink-0">{log.ip}</span>
-                              <span className="text-slate-300 font-bold shrink-0">{log.user}:</span>
+                              <span className="text-slate-200 font-extrabold shrink-0">{log.user}:</span>
                               <span className="text-white flex-1">{log.action}</span>
                               <Badge className={
                                 log.status === "Success" 
-                                  ? "bg-green-500/10 border-green-500/20 text-green-400" 
+                                  ? "bg-green-500/10 border-green-500/30 text-green-300 font-bold" 
                                   : log.status === "Warning" 
-                                  ? "bg-amber-500/10 border-amber-500/20 text-amber-400" 
-                                  : "bg-rose-500/10 border-rose-500/20 text-rose-400"
+                                  ? "bg-amber-500/10 border-amber-500/30 text-amber-300 font-bold" 
+                                  : "bg-rose-500/10 border-rose-500/30 text-rose-300 font-bold"
                               }>
                                 {log.status}
                               </Badge>
